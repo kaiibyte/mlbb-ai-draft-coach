@@ -4,7 +4,7 @@ name: MLBBDraftCoach
 options:
   bundleIdPrefix: com.draftcoach
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "27.0"
 
 targets:
   MLBBDraftCoach:
@@ -19,4 +19,5 @@ targets:
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1,2"
-        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        IPHONEOS_DEPLOYMENT_TARGET: "27.0"
+        INFOPLIST_KEY_NSScreenCaptureUsageDescription: "MLBB Draft Coach captures your screen with your permission to recognize draft picks, bans and turns."
