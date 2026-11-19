@@ -17,10 +17,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "A valid draft object is required." });
   }
 
-  if (JSON.stringify(draft).length > 10000) {
-    return res.status(413).json({ error: "Draft is too large." });
-  }
-
   const BASE = "https://mlbbdex.com/api/v1";
 
   const rankAliases = {
@@ -33,8 +29,8 @@ export default async function handler(req, res) {
     "mythical glory": "glory"
   };
 
-  const rankInput = String(draft.rank || "glory").toLowerCase();
-  const rank = rankAliases[rankInput] || "glory";
+  const requestedRank = String(draft.rank || "glory").toLowerCase();
+  const rank = rankAliases[requestedRank] || "glory";
   const lane = String(draft.lane || draft.requestedLane || "Gold");
 
   const normalize = value =>
@@ -43,7 +39,7 @@ export default async function handler(req, res) {
   async function getJSON(url) {
     const response = await fetch(url, {
       headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(10000)
     });
 
     if (!response.ok) {
@@ -59,17 +55,35 @@ export default async function handler(req, res) {
   const getField = (hero, first, second) =>
     hero?.[first] ?? hero?.[second] ?? [];
 
+  function compactCounterList(list, heroes) {
+    if (!Array.isArray(list)) return [];
+
+    return list.slice(0, 5).map(item => ({
+      hero:
+        heroes.find(h => h.slug === item.slug)?.name ||
+        item.name ||
+        item.slug ||
+        "Unknown",
+      advantage: item.advantage ?? null
+    }));
+  }
+
   try {
-    // Load MLBB heroes and rankings.
+    // Load hero catalogue and ranked statistics.
     const [heroResult, rankingResult] = await Promise.all([
       getJSON(`${BASE}/heroes`),
       getJSON(`${BASE}/rankings`)
     ]);
 
-    const heroes = Array.isArray(heroResult.data) ? heroResult.data : [];
+    const heroes = Array.isArray(heroResult.data)
+      ? heroResult.data
+      : [];
+
     const rankings = Array.isArray(rankingResult.data?.heroes)
       ? rankingResult.data.heroes
-      : [];
+      : Array.isArray(rankingResult.data)
+        ? rankingResult.data
+        : [];
 
     if (!heroes.length) throw new Error("Hero catalogue is empty.");
     if (!rankings.length) throw new Error("Rankings unavailable.");
@@ -90,42 +104,62 @@ export default async function handler(req, res) {
       ? draft.enemy.map(getName).filter(Boolean)
       : [];
 
-    const pickedNames = [...new Set([...allied, ...enemy])];
+    const pickedNames = [
+      ...new Set([...allied, ...enemy])
+    ];
 
-    // Fetch matchup data for selected heroes.
-    const counterResults = await Promise.allSettled(
+    // Fetch actual profiles and matchup data for picked heroes only.
+    const profileResults = await Promise.allSettled(
       pickedNames.slice(0, 10).map(async name => {
         const hero = heroMap.get(normalize(name));
         if (!hero?.slug) return null;
 
-        const result = await getJSON(
-          `${BASE}/heroes/${encodeURIComponent(hero.slug)}/counters`
-        );
+        const [profileResult, counterResult] = await Promise.allSettled([
+          getJSON(`${BASE}/heroes/${encodeURIComponent(hero.slug)}`),
+          getJSON(`${BASE}/heroes/${encodeURIComponent(hero.slug)}/counters`)
+        ]);
 
-        const data = result.data?.[rank];
-        if (!data) return null;
+        const profile =
+          profileResult.status === "fulfilled"
+            ? profileResult.value.data
+            : null;
 
-        const resolve = list =>
-          (Array.isArray(list) ? list : []).slice(0, 5).map(item => ({
-            hero: heroes.find(h => h.slug === item.slug)?.name || item.slug,
-            advantage: item.advantage
-          }));
+        const counterData =
+          counterResult.status === "fulfilled"
+            ? counterResult.value.data?.[rank]
+            : null;
 
         return {
-          hero: hero.name,
-          winRate: data.winRate ?? null,
-          strongAgainst: resolve(data.strong),
-          weakAgainst: resolve(data.weak)
+          name: hero.name,
+          roles: getField(hero, "roles", "role"),
+          lanes: getField(hero, "lanes", "lane"),
+
+          // Only actual profile data; no generated ability descriptions.
+          skills: profile?.skills ?? profile?.skill ?? null,
+
+          counters: counterData
+            ? {
+                baselineWinRate: counterData.winRate ?? null,
+                strongAgainst: compactCounterList(
+                  counterData.strong,
+                  heroes
+                ),
+                weakAgainst: compactCounterList(
+                  counterData.weak,
+                  heroes
+                )
+              }
+            : null
         };
       })
     );
 
-    const counters = counterResults
+    const pickedDetails = profileResults
       .filter(result => result.status === "fulfilled")
       .map(result => result.value)
       .filter(Boolean);
 
-    // Keep every hero available, but use compact fields.
+    // Every hero remains eligible, except Wanwan.
     const catalogue = heroes
       .filter(hero => normalize(hero.name) !== "wanwan")
       .map(hero => {
@@ -136,87 +170,85 @@ export default async function handler(req, res) {
           roles: getField(hero, "roles", "role"),
           lanes: getField(hero, "lanes", "lane"),
           tier: stats?.tier ?? null,
-          winRate: stats?.winRate ?? null
+          winRate: stats?.winRate ?? null,
+          pickRate: stats?.pickRate ?? null,
+          banRate: stats?.banRate ?? null
         };
       });
 
-    // Compact ranking list: only top 25.
-    const topRanked = [...rankings]
-      .sort((a, b) => (Number(b.winRate) || 0) - (Number(a.winRate) || 0))
-      .slice(0, 25)
-      .map(hero => ({
-        hero: heroes.find(h => h.slug === hero.slug)?.name || hero.slug,
-        tier: hero.tier ?? null,
-        winRate: hero.winRate ?? null,
-        pickRate: hero.pickRate ?? null,
-        banRate: hero.banRate ?? null
-      }));
-
-    const pickedDetails = pickedNames.map(name => {
-      const hero = heroMap.get(normalize(name));
-      if (!hero) return { name, found: false };
-
-      return {
-        name: hero.name,
-        roles: getField(hero, "roles", "role"),
-        lanes: getField(hero, "lanes", "lane"),
-        stats: rankingMap.get(hero.slug) || null
-      };
-    });
-
     const mlbbData = {
       source: "MLBBDex",
-      measuredAt: rankingResult.data?.measuredAt || null,
+      sourceURL: "https://mlbbdex.com/en",
+      rankingMeasuredAt: rankingResult.data?.measuredAt ?? null,
       rank,
       requestedLane: lane,
       allied,
       enemy,
-      pickedDetails,
-      counters,
-      catalogue,
-      topRanked
+      pickedHeroes: pickedDetails,
+      availableHeroes: catalogue
     };
 
     const instructions = `
-You are a professional Mobile Legends Bang Bang draft coach.
+You are a careful professional Mobile Legends: Bang Bang draft coach.
 
-PLAYER:
-- Consider every hero except Wanwan.
-- Preferred lane: ${lane}.
-- Especially consider Fighter Gold.
-- Also consider legitimate Mage Gold, Marksman Gold, Tank EXP and Fighter EXP picks.
-- Do not recommend unrealistic lane swaps without explaining risks.
+IMPORTANT ACCURACY RULES:
 
-ANALYZE:
-- Allied and enemy compositions.
-- Lane matchups.
-- Counters and synergies.
-- Damage balance, frontline and crowd control.
-- Early, mid and late game.
-- Objective control.
-- Best remaining pick and ban advice.
+1. Treat the supplied MLBBDex data as your factual source.
+2. NEVER invent hero abilities, shields, stuns, damage,
+   healing, mobility, immunity or crowd control.
+3. Only describe a hero's specific abilities if their
+   actual skill descriptions are included in the data.
+4. For heroes without supplied skill descriptions,
+   discuss only their supplied roles, lanes and statistics.
+5. NEVER invent win rates, pick rates, ban rates or tiers.
+6. NEVER invent percentage lane advantages or matchup gaps.
+7. A statistical counter is evidence, not proof of a guaranteed win.
+8. If matchup information is missing, clearly say so.
+9. Never claim a synergy or counter is statistically proven
+   unless the supplied data supports it.
+10. Never recommend Wanwan.
+11. Recommend only heroes in availableHeroes.
+12. Do not confuse ranked statistics with MPL or pro statistics.
+    No professional tournament statistics are supplied here.
 
-RULES:
-- Recommend only heroes in the supplied catalogue.
-- Never recommend Wanwan.
-- Never invent statistics or matchup facts.
-- Use supplied statistics carefully.
-- Distinguish ranked data from professional/MPL data.
-- No MPL statistics are supplied here.
-- Explain why your recommendation is good.
+PLAYER PREFERENCES:
 
-FORMAT:
+- Consider all available heroes.
+- Prioritize ${lane} lane.
+- The player especially likes Fighter Gold Lane.
+- Consider legitimate flexible picks such as Mage Gold,
+  Fighter Gold, Tank EXP and Fighter EXP.
+- Do not recommend an unusual lane without explaining
+  the risks and whether the supplied lane data supports it.
+
+DRAFT ANALYSIS:
+
+Evaluate:
+- Allied and enemy composition.
+- Available lane options.
+- Supplied matchup counters.
+- Team damage balance.
+- Frontline and crowd control, only when supported by facts.
+- Early, mid and late game considerations, without inventing
+  specific abilities or statistics.
+- The safest and strongest practical remaining pick.
+
+RESPONSE FORMAT:
+
 1. BEST PICK
 2. TWO ALTERNATIVES
 3. LANE MATCHUP
-4. COUNTERS AND SYNERGIES
+4. VERIFIED COUNTERS AND SYNERGIES
 5. TEAM COMPOSITION
 6. WARNINGS
 
-Be concise and decisive.
+For each recommendation, explain what is supported by data
+and what is your strategic judgment.
+
+If data is insufficient, say so instead of guessing.
+Be concise, practical and decisive.
 `;
 
-    // Send compact MLBB data to Groq.
     const aiResponse = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
       {
@@ -235,14 +267,14 @@ Be concise and decisive.
             {
               role: "user",
               content:
-                "MLBB DATA:\n" +
+                "ACTUAL MLBB DATA:\n" +
                 JSON.stringify(mlbbData) +
                 "\n\nPLAYER DRAFT:\n" +
                 JSON.stringify(draft)
             }
           ],
           max_completion_tokens: 1400,
-          temperature: 0.4
+          temperature: 0.2
         }),
         signal: AbortSignal.timeout(45000)
       }
@@ -252,6 +284,7 @@ Be concise and decisive.
 
     if (!aiResponse.ok) {
       console.error("Groq error:", aiData.error?.message);
+
       return res.status(502).json({
         error: "Groq could not analyze this draft.",
         details: aiData.error?.message || "Unknown Groq error."
@@ -274,11 +307,12 @@ Be concise and decisive.
       heroesLoaded: heroes.length,
       availableHeroes: catalogue.length,
       rankingsLoaded: rankings.length,
-      countersLoaded: counters.length,
+      pickedHeroesAnalyzed: pickedDetails.length,
       rankUsedForCounters: rank,
       requestedLane: lane,
       dataMeasuredAt: rankingResult.data?.measuredAt || null,
       source: "MLBBDex",
+      sourceURL: "https://mlbbdex.com/en",
       recommendation
     });
 
