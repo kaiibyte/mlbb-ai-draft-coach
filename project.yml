@@ -12,6 +12,13 @@ targets:
     platform: iOS
     sources:
       - MLBBDraftCoach
+
+    info:
+      properties:
+        NSScreenCaptureUsageDescription: "MLBB Draft Coach captures your screen with your permission to recognize MLBB picks, bans and draft turns."
+        UIBackgroundModes:
+          - screen-capture
+
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.draftcoach.mlbbdraftcoach
@@ -20,4 +27,3 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1,2"
         IPHONEOS_DEPLOYMENT_TARGET: "27.0"
-        INFOPLIST_KEY_NSScreenCaptureUsageDescription: "MLBB Draft Coach captures your screen with your permission to recognize draft picks, bans and turns."
