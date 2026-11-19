@@ -6,9 +6,9 @@ struct ContentView: View {
     @State private var selectedTab = "Draft"
     @State private var speaking = false
     @State private var showInfo = false
+    @StateObject private var heroAPI = HeroAPI()
 
     private let tabs = ["Draft", "Heroes", "Meta", "Settings"]
-
     private let synthesizer = AVSpeechSynthesizer()
 
     var body: some View {
@@ -41,10 +41,15 @@ struct ContentView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 22) {
-                        if selectedTab == "Draft" {
+                        switch selectedTab {
+                        case "Draft":
                             draftScreen
-                        } else {
-                            otherScreen
+                        case "Heroes":
+                            heroesScreen
+                        case "Meta":
+                            placeholderScreen("Meta", description: "Ranked statistics and current hero rankings will appear here.")
+                        default:
+                            placeholderScreen("Settings", description: "Voice and app preferences will appear here.")
                         }
                     }
                     .padding(.horizontal, 20)
@@ -57,10 +62,13 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .animation(.spring(response: 0.4, dampingFraction: 0.82), value: selectedTab)
+        .task {
+            await heroAPI.loadHeroes()
+        }
         .alert("Draft Coach", isPresented: $showInfo) {
             Button("Got it", role: .cancel) { }
         } message: {
-            Text("Your AI draft assistant is being built. Live hero data and draft analysis will be connected next.")
+            Text("Your voice-first MLBB draft assistant is being built. Hero data is loaded from the community hero database.")
         }
     }
 
@@ -88,6 +96,7 @@ struct ContentView: View {
                     .background(.ultraThinMaterial, in: Circle())
                     .overlay(Circle().stroke(.white.opacity(0.12)))
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
@@ -115,8 +124,8 @@ struct ContentView: View {
             }
 
             HStack(spacing: 10) {
-                statusPill("API", "Connecting")
-                statusPill("AI", "Coming soon")
+                statusPill("HERO API", heroAPI.heroes.isEmpty ? "Loading" : "Connected")
+                statusPill("AI", "Local mode")
             }
 
             VStack(alignment: .leading, spacing: 14) {
@@ -133,28 +142,28 @@ struct ContentView: View {
             .glassCard()
 
             VStack(alignment: .leading, spacing: 12) {
-                Text("AI RECOMMENDATION")
+                Text("VOICE COACH")
                     .font(.system(size: 12, weight: .bold))
                     .tracking(1.5)
                     .foregroundStyle(.white.opacity(0.55))
 
                 HStack(spacing: 12) {
-                    Image(systemName: "brain.head.profile")
-                        .font(.system(size: 25))
+                    Image(systemName: "waveform")
+                        .font(.system(size: 27))
                         .foregroundStyle(.cyan)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Waiting for draft data")
+                        Text("Your draft assistant")
                             .font(.system(size: 16, weight: .bold))
 
-                        Text("Your counter picks and draft analysis will appear here.")
+                        Text("Hear announcements and hero information.")
                             .font(.system(size: 12))
                             .foregroundStyle(.white.opacity(0.55))
                     }
                 }
 
                 Button {
-                    speakAdvice()
+                    speak("Welcome to MLBB Draft Coach. Your voice assistant is ready. Open the Heroes tab to hear hero names and roles.")
                 } label: {
                     Label(
                         speaking ? "Stop voice" : "Test voice coach",
@@ -190,12 +199,137 @@ struct ContentView: View {
         }
     }
 
-    private var otherScreen: some View {
+    private var heroesScreen: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("HERO DATABASE")
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(2)
+                    .foregroundStyle(.cyan)
+
+                Text("Meet the heroes.")
+                    .font(.system(size: 27, weight: .bold, design: .rounded))
+
+                Text("Tap a speaker to hear the hero's name and role.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+
+            HStack(spacing: 10) {
+                Label("\(heroAPI.heroes.count) heroes", systemImage: "person.3.fill")
+                    .font(.system(size: 12, weight: .semibold))
+
+                Spacer()
+
+                Button {
+                    Task {
+                        await heroAPI.loadHeroes()
+                    }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .disabled(heroAPI.isLoading)
+            }
+            .foregroundStyle(.cyan)
+            .glassCard()
+
+            if heroAPI.isLoading && heroAPI.heroes.isEmpty {
+                ProgressView("Loading heroes...")
+                    .tint(.cyan)
+                    .frame(maxWidth: .infinity)
+                    .padding(30)
+                    .glassCard()
+            } else if let error = heroAPI.errorMessage,
+                      heroAPI.heroes.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.orange)
+
+                    Text("Couldn't load heroes")
+                        .font(.system(size: 17, weight: .bold))
+
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .multilineTextAlignment(.center)
+
+                    Button("Try again") {
+                        Task {
+                            await heroAPI.loadHeroes()
+                        }
+                    }
+                    .foregroundStyle(.cyan)
+                }
+                .frame(maxWidth: .infinity)
+                .glassCard()
+            } else {
+                VStack(spacing: 9) {
+                    ForEach(heroAPI.heroes) { hero in
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(hero.name)
+                                    .font(.system(size: 15, weight: .bold))
+
+                                Text([
+                                    hero.role,
+                                    hero.lane
+                                ].filter { !$0.isEmpty }.joined(separator: " • "))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.white.opacity(0.55))
+                            }
+
+                            Spacer()
+
+                            Button {
+                                speak("\(hero.name). Role: \(hero.role.isEmpty ? "Unknown" : hero.role). Lane: \(hero.lane.isEmpty ? "Unknown" : hero.lane).")
+                            } label: {
+                                Image(systemName: "speaker.wave.2.fill")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(.cyan)
+                                    .frame(width: 42, height: 42)
+                                    .background(.white.opacity(0.07), in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(13)
+                        .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 15))
+                    }
+                }
+                .glassCard()
+
+                Button {
+                    let announcement = heroAPI.heroes.prefix(40).map {
+                        "\($0.name), role \($0.role.isEmpty ? "unknown" : $0.role)"
+                    }.joined(separator: ". ")
+
+                    speak("Here are the heroes. \(announcement)")
+                } label: {
+                    Label("Read hero list aloud", systemImage: "speaker.wave.2.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
+                        .background(.cyan, in: RoundedRectangle(cornerRadius: 16))
+                        .foregroundStyle(.black)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if let updated = heroAPI.lastUpdated {
+                Text("Last updated: \(updated.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+        }
+    }
+
+    private func placeholderScreen(_ title: String, description: String) -> some View {
         VStack(alignment: .leading, spacing: 15) {
-            Text(selectedTab)
+            Text(title)
                 .font(.system(size: 28, weight: .bold, design: .rounded))
 
-            Text("This section will be connected as we build the app.")
+            Text(description)
                 .foregroundStyle(.white.opacity(0.6))
         }
         .frame(maxWidth: .infinity, minHeight: 300, alignment: .leading)
@@ -293,26 +427,28 @@ struct ContentView: View {
     private func iconFor(_ tab: String) -> String {
         switch tab {
         case "Draft": return "rectangle.stack.fill"
-        case "Heroes": return "person.crop.square"
+        case "Heroes": return "person.3"
         case "Meta": return "chart.bar.fill"
         default: return "gearshape.fill"
         }
     }
 
-    private func speakAdvice() {
+    private func speak(_ message: String) {
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
             speaking = false
-            return
+
+            if message == "STOP" {
+                return
+            }
         }
 
-        let utterance = AVSpeechUtterance(
-            string: "Draft Coach voice test. Your AI assistant is ready to help with your next draft."
-        )
+        let utterance = AVSpeechUtterance(string: message)
         utterance.rate = 0.48
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        synthesizer.speak(utterance)
+
         speaking = true
+        synthesizer.speak(utterance)
     }
 }
 
