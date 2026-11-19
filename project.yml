@@ -10,8 +10,9 @@ targets:
   MLBBDraftCoach:
     type: application
     platform: iOS
+
     sources:
-      - MLBBDraftCoach
+      - path: MLBBDraftCoach
 
     info:
       properties:
