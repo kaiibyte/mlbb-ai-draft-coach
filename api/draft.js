@@ -2,19 +2,20 @@
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
+
     return res.status(405).json({
       error: "Method not allowed"
     });
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
 
-  // Keep free/local mode available when no key is configured.
+  // Free local mode if Groq is not configured.
   if (!apiKey) {
     return res.status(200).json({
       mode: "local",
       aiAvailable: false,
-      message: "OpenAI is not activated. Use local draft analysis."
+      message: "Groq is not activated. Use local draft analysis."
     });
   }
 
@@ -40,7 +41,7 @@ export default async function handler(req, res) {
 
   try {
     const response = await fetch(
-      "https://api.openai.com/v1/responses",
+      "https://api.groq.com/openai/v1/chat/completions",
       {
         method: "POST",
         headers: {
@@ -48,32 +49,52 @@ export default async function handler(req, res) {
           "Authorization": `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: process.env.OPENAI_MODEL || "gpt-5.4-mini",
-          instructions: `
+          model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
+
+          messages: [
+            {
+              role: "system",
+              content: `
 You are an expert Mobile Legends: Bang Bang draft coach.
 
-Analyze the supplied draft carefully.
+Your job is to analyze drafts and give accurate,
+competitive recommendations.
 
-Consider:
+Analyze:
+
 - Allied and enemy heroes
-- Team composition and roles
 - Hero counters and synergies
+- Team composition
 - Damage balance
 - Crowd control
 - Frontline and durability
+- Team fight potential
 - Draft weaknesses
 - Best remaining hero picks
+- Ban recommendations
 
-Only use information supplied in the draft.
-Never invent win rates, statistics, patch data, or hero ownership.
-If information is missing, say so.
+IMPORTANT RULES:
 
-Give practical, concise recommendations.
-Explain WHY a recommendation is good.
-Do not recommend heroes marked as not owned.
-`,
-          input: draftText,
-          max_output_tokens: 600
+1. Only use supplied MLBB data.
+2. Never invent win rates or statistics.
+3. Never pretend outdated information is current.
+4. Respect the player's owned-hero list.
+5. Never recommend heroes marked as not owned.
+6. Explain WHY each recommendation is good.
+7. Give concise, practical advice suitable for a live draft.
+8. If information is missing, clearly say so.
+
+Respond like a professional MLBB draft coach.
+`
+            },
+            {
+              role: "user",
+              content: "Analyze this Mobile Legends draft:\n" + draftText
+            }
+          ],
+
+          max_completion_tokens: 800,
+          temperature: 0.5
         })
       }
     );
@@ -81,39 +102,31 @@ Do not recommend heroes marked as not owned.
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("OpenAI API error:", data.error?.message);
+      console.error("Groq API error:", data.error?.message);
 
       return res.status(502).json({
         error: "The AI service could not process this draft."
       });
     }
 
-    // Read the generated text from the Responses API output.
-    let recommendation = data.output_text || "";
+    const recommendation =
+      data.choices?.[0]?.message?.content || "";
 
-    if (!recommendation && Array.isArray(data.output)) {
-      recommendation = data.output
-        .filter(item => item.type === "message")
-        .flatMap(item => item.content || [])
-        .filter(item => item.type === "output_text")
-        .map(item => item.text || "")
-        .join("\n");
-    }
-
-    if (!recommendation) {
+    if (!recommendation.trim()) {
       return res.status(502).json({
-        error: "The AI returned an empty recommendation."
+        error: "Groq returned an empty recommendation."
       });
     }
 
     return res.status(200).json({
-      mode: "openai",
+      mode: "groq",
       aiAvailable: true,
+      model: data.model,
       recommendation
     });
 
   } catch (error) {
-    console.error("Draft AI error:", error);
+    console.error("Groq draft error:", error);
 
     return res.status(500).json({
       error: "AI service temporarily unavailable."
