@@ -1,0 +1,82 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MLBB AI Test</title>
+<style>
+body {
+  background: #101522;
+  color: white;
+  font-family: system-ui;
+  padding: 24px;
+}
+main {
+  max-width: 500px;
+  margin: 50px auto;
+  background: #1c2638;
+  padding: 24px;
+  border-radius: 22px;
+}
+button {
+  background: #7c6cff;
+  color: white;
+  border: 0;
+  border-radius: 12px;
+  padding: 15px;
+  width: 100%;
+  font-size: 16px;
+}
+#result {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 20px;
+  line-height: 1.5;
+}
+</style>
+</head>
+<body>
+<main>
+  <h2>MLBB AI Draft Coach</h2>
+  <p>Backend connection test</p>
+  <button onclick="testAI()">Test AI Connection</button>
+  <div id="result">Waiting for test...</div>
+</main>
+
+<script>
+async function testAI() {
+  const result = document.getElementById("result");
+  result.textContent = "Testing...";
+
+  try {
+    const response = await fetch("/api/draft", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        draft: {
+          allied: ["Tigreal", "Nolan", "Lunox"],
+          enemy: ["Chou", "Lancelot", "Beatrix"],
+          task: "Analyze this draft and recommend a good next pick."
+        }
+      })
+    });
+
+    const data = await response.json();
+
+    result.textContent =
+      "HTTP Status: " + response.status +
+      "\nMode: " + (data.mode || "unknown") +
+      "\n\n" +
+      (data.recommendation || data.message || data.error ||
+       JSON.stringify(data, null, 2));
+
+  } catch (error) {
+    result.textContent = "Connection failed: " + error.message;
+  }
+}
+</script>
+</body>
+</html>
