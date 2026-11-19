@@ -1,0 +1,22 @@
+
+name: MLBBDraftCoach
+
+options:
+  bundleIdPrefix: com.draftcoach
+  deploymentTarget:
+    iOS: "17.0"
+
+targets:
+  MLBBDraftCoach:
+    type: application
+    platform: iOS
+    sources:
+      - MLBBDraftCoach
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.draftcoach.mlbbdraftcoach
+        PRODUCT_NAME: MLBBDraftCoach
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
