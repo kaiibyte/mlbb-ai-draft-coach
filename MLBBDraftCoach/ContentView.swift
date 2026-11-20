@@ -23,7 +23,7 @@ struct ContentView: View {
                 colors: [
                     Color(red: 0.035, green: 0.045, blue: 0.10),
                     Color(red: 0.10, green: 0.07, blue: 0.19),
-                    Color.black
+                    .black
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -68,34 +68,28 @@ struct ContentView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header
-
                     captureCard
-
                     recognizedHeroesCard
-
                     laneCard
 
                     teamCard(
                         title: "Your Team",
                         heroes: allied,
-                        color: .cyan
+                        team: .ally
                     )
 
                     teamCard(
                         title: "Enemy Team",
                         heroes: enemy,
-                        color: .red
+                        team: .enemy
                     )
 
                     turnCard
-
                     analysisCard
-
                     voiceCard
                 }
                 .padding()
             }
-            .background(Color.clear)
             .navigationBarHidden(true)
         }
     }
@@ -114,7 +108,6 @@ struct ContentView: View {
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.6))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var captureCard: some View {
@@ -129,37 +122,26 @@ struct ContentView: View {
 
                     Text(screenCapture.status)
                         .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.8))
                 }
 
                 HStack {
-                    Button {
+                    Button("Start Capture") {
                         screenCapture.startScreenCapture()
-                    } label: {
-                        Label("Start Capture", systemImage: "record.circle")
-                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.purple)
                     .disabled(screenCapture.isCapturing)
 
-                    Button {
+                    Button("Stop") {
                         screenCapture.stopScreenCapture()
-                    } label: {
-                        Label("Stop", systemImage: "stop.circle")
-                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                     .disabled(!screenCapture.isCapturing)
                 }
 
-                Text("OCR scans visible text on your selected screen.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
-
                 Text("OCR scans: \(screenCapture.framesReceived)")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -171,34 +153,32 @@ struct ContentView: View {
 
                 if recognition.detectedHeroes.isEmpty {
                     Text("No confirmed hero names yet.")
-                        .foregroundStyle(.white.opacity(0.5))
-                } else {
-                    ForEach(recognition.detectedHeroes, id: \.self) { hero in
-                        HStack {
-                            Text(hero)
-                                .fontWeight(.medium)
-
-                            Spacer()
-
-                            Button("Your Team") {
-                                addHero(hero, to: .ally)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.cyan)
-
-                            Button("Enemy") {
-                                addHero(hero, to: .enemy)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.red)
-                        }
-                        .font(.caption)
-                    }
+                        .foregroundStyle(.secondary)
                 }
 
-                Text("Assign recognized heroes to the correct team. OCR does not determine team or ban slots.")
+                ForEach(recognition.detectedHeroes, id: \.self) { hero in
+                    HStack {
+                        Text(hero)
+                        Spacer()
+
+                        Button("Ally") {
+                            addHero(hero, to: .ally)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.cyan)
+
+                        Button("Enemy") {
+                            addHero(hero, to: .enemy)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                    }
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
+                }
+
+                Text("Check team assignment before analyzing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -209,8 +189,8 @@ struct ContentView: View {
                 sectionTitle("YOUR LANE")
 
                 Picker("Lane", selection: $selectedLane) {
-                    ForEach(lanes, id: \.self) { lane in
-                        Text(lane).tag(lane)
+                    ForEach(lanes, id: \.self) {
+                        Text($0).tag($0)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -235,7 +215,7 @@ struct ContentView: View {
     private func teamCard(
         title: String,
         heroes: [String],
-        color: Color
+        team: Team
     ) -> some View {
         card {
             VStack(alignment: .leading, spacing: 10) {
@@ -243,23 +223,23 @@ struct ContentView: View {
 
                 if heroes.isEmpty {
                     Text("No heroes added.")
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.secondary)
                 }
 
                 ForEach(heroes, id: \.self) { hero in
                     HStack {
                         Text(hero)
                         Spacer()
+
                         Button {
-                            removeHero(hero, from: title == "Your Team" ? .ally : .enemy)
+                            removeHero(hero, from: team)
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.white.opacity(0.5))
                         }
+                        .foregroundStyle(.secondary)
                     }
                 }
             }
-            .foregroundStyle(color)
         }
     }
 
@@ -276,9 +256,9 @@ struct ContentView: View {
                         }
                     }
 
-                Text("Turn detection is manual until the game screen layout is validated.")
+                Text("Turn selection is manual for now.")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -299,8 +279,11 @@ struct ContentView: View {
                                 .tint(.white)
                         }
 
-                        Text(draftAPI.isLoading ? "Analyzing..." : "Analyze Draft")
-                            .fontWeight(.bold)
+                        Text(
+                            draftAPI.isLoading
+                            ? "Analyzing..."
+                            : "Analyze Draft"
+                        )
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 7)
@@ -319,7 +302,6 @@ struct ContentView: View {
                     Text(draftAPI.recommendation)
                         .font(.subheadline)
                         .textSelection(.enabled)
-                        .padding(.top, 5)
                 }
             }
         }
@@ -409,8 +391,8 @@ struct ContentView: View {
 
                 Section("Recognition") {
                     Text("Screen capture requires your permission.")
-                    Text("Hero names are recognized locally using Apple Vision.")
-                    Text("Team assignment and turn detection are not automatic yet.")
+                    Text("Hero names are recognized locally.")
+                    Text("Team assignment and turn detection are manual.")
                 }
             }
             .navigationTitle("Settings")
@@ -447,6 +429,7 @@ struct ContentView: View {
             if !allied.contains(hero) {
                 allied.append(hero)
             }
+
         case .enemy:
             allied.removeAll { $0 == hero }
             if !enemy.contains(hero) {
@@ -478,25 +461,19 @@ struct ContentView: View {
     }
 
     private func announceRecommendation() {
-        let availableNames = heroAPI.heroes
-            .map(\.name)
-            .filter { $0.lowercased() != "wanwan" }
+        guard isYourTurn else { return }
 
-        let recommendation = draftAPI.recommendation.lowercased()
-
-        let matches = availableNames.filter {
-            recommendation.contains($0.lowercased())
+        guard let parsed = RecommendationParser.parse(
+            draftAPI.recommendation,
+            availableHeroes: heroAPI.heroes
+        ) else {
+            return
         }
 
-        guard let bestPick = matches.first else { return }
-
-        let alternatives = matches
-            .filter { $0 != bestPick }
-
         voiceCoach.announce(
-            bestPick: bestPick,
-            alternatives: alternatives,
-            isYourTurn: isYourTurn
+            bestPick: parsed.bestPick,
+            alternatives: parsed.alternatives,
+            isYourTurn: true
         )
     }
 }
