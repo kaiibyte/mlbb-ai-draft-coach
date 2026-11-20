@@ -3,27 +3,21 @@ import SwiftUI
 import ScreenCaptureKit
 import CoreMedia
 
-@MainActor
-final class ScreenCaptureManager: NSObject, ObservableObject,
-    SCContentSharingPickerObserver,
-    SCStreamOutput,
-    SCStreamDelegate {
+final class ScreenCaptureManager: NSObject, ObservableObject {
 
-    @Published private(set) var isCapturing = false
-    @Published private(set) var status = "Screen capture is off"
-    @Published private(set) var framesReceived = 0
+    @MainActor @Published private(set) var isCapturing = false
+    @MainActor @Published private(set) var status = "Screen capture is off"
+    @MainActor @Published private(set) var framesReceived = 0
 
     private let picker = SCContentSharingPicker.shared
+
     private var stream: SCStream?
 
     private let frameQueue = DispatchQueue(
         label: "com.draftcoach.screenframes"
     )
 
-    override init() {
-        super.init()
-    }
-
+    @MainActor
     func startScreenCapture() {
         guard !isCapturing else { return }
 
@@ -39,28 +33,23 @@ final class ScreenCaptureManager: NSObject, ObservableObject,
         picker.add(self)
 
         status = "Waiting for screen sharing permission..."
-
         picker.present()
     }
 
+    @MainActor
     func stopScreenCapture() {
         Task {
             await stopStream()
         }
     }
 
+    @MainActor
     private func startStream(using filter: SCContentFilter) async {
         await stopStream()
 
         let configuration = SCStreamConfiguration()
-
         configuration.width = 1024
         configuration.height = 576
-        configuration.minimumFrameInterval = CMTime(
-            value: 1,
-            timescale: 2
-        )
-
         configuration.queueDepth = 3
         configuration.capturesAudio = false
 
@@ -91,6 +80,7 @@ final class ScreenCaptureManager: NSObject, ObservableObject,
         }
     }
 
+    @MainActor
     private func stopStream() async {
         guard let currentStream = stream else {
             isCapturing = false
@@ -107,35 +97,45 @@ final class ScreenCaptureManager: NSObject, ObservableObject,
         isCapturing = false
         status = "Screen capture is off"
     }
+}
 
-    // MARK: Screen sharing picker
+// MARK: - Screen sharing picker
 
-    func contentSharingPicker(
+extension ScreenCaptureManager: SCContentSharingPickerObserver {
+
+    nonisolated func contentSharingPicker(
         _ picker: SCContentSharingPicker,
         didUpdateWith filter: SCContentFilter,
         for stream: SCStream?
     ) {
-        Task { @MainActor in
-            await startStream(using: filter)
+        Task { @MainActor [weak self] in
+            await self?.startStream(using: filter)
         }
     }
 
-    func contentSharingPicker(
+    nonisolated func contentSharingPicker(
         _ picker: SCContentSharingPicker,
         didCancelFor stream: SCStream?
     ) {
-        status = "Screen sharing cancelled"
+        Task { @MainActor [weak self] in
+            self?.status = "Screen sharing cancelled"
+        }
     }
 
-    func contentSharingPickerStartDidFailWithError(
+    nonisolated func contentSharingPickerStartDidFailWithError(
         _ error: Error
     ) {
-        status = "Picker failed: \(error.localizedDescription)"
+        Task { @MainActor [weak self] in
+            self?.status = "Picker failed: \(error.localizedDescription)"
+        }
     }
+}
 
-    // MARK: Screen frames
+// MARK: - Screen stream
 
-    func stream(
+extension ScreenCaptureManager: SCStreamOutput, SCStreamDelegate {
+
+    nonisolated func stream(
         _ stream: SCStream,
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of outputType: SCStreamOutputType
@@ -143,21 +143,19 @@ final class ScreenCaptureManager: NSObject, ObservableObject,
         guard outputType == .screen else { return }
         guard CMSampleBufferIsValid(sampleBuffer) else { return }
 
-        Task { @MainActor in
-            framesReceived += 1
+        Task { @MainActor [weak self] in
+            self?.framesReceived += 1
         }
     }
 
-    // MARK: Stream errors
-
-    func stream(
+    nonisolated func stream(
         _ stream: SCStream,
         didStopWithError error: Error
     ) {
-        Task { @MainActor in
-            isCapturing = false
-            self.stream = nil
-            status = "Capture stopped: \(error.localizedDescription)"
+        Task { @MainActor [weak self] in
+            self?.isCapturing = false
+            self?.stream = nil
+            self?.status = "Capture stopped: \(error.localizedDescription)"
         }
     }
 }
