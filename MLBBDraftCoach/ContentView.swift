@@ -1,626 +1,502 @@
 
 import SwiftUI
-import AVFoundation
 
 struct ContentView: View {
-    @State private var selectedTab = "Draft"
-    @State private var speaking = false
-    @State private var showInfo = false
-
     @StateObject private var heroAPI = HeroAPI()
     @StateObject private var screenCapture = ScreenCaptureManager()
+    @StateObject private var recognition = DraftRecognitionManager()
+    @StateObject private var draftAPI = DraftAPI()
+    @StateObject private var voiceCoach = VoiceCoach()
 
-    private let tabs = ["Draft", "Heroes", "Meta", "Settings"]
-    private let synthesizer = AVSpeechSynthesizer()
+    @State private var allied: [String] = []
+    @State private var enemy: [String] = []
+    @State private var selectedLane = "Gold"
+    @State private var selectedRank = "glory"
+    @State private var isYourTurn = false
+    @State private var selectedTab = "Draft"
+
+    private let lanes = ["Gold", "EXP", "Mid", "Jungle", "Roam"]
 
     var body: some View {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color(red: 0.035, green: 0.055, blue: 0.12),
-                    Color(red: 0.10, green: 0.10, blue: 0.22),
-                    Color(red: 0.04, green: 0.16, blue: 0.19)
+                    Color(red: 0.035, green: 0.045, blue: 0.10),
+                    Color(red: 0.10, green: 0.07, blue: 0.19),
+                    Color.black
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 
-            Circle()
-                .fill(Color.cyan.opacity(0.18))
-                .frame(width: 280)
-                .blur(radius: 90)
-                .offset(x: 150, y: -280)
-
-            Circle()
-                .fill(Color.purple.opacity(0.20))
-                .frame(width: 260)
-                .blur(radius: 100)
-                .offset(x: -150, y: 100)
-
-            VStack(spacing: 0) {
-                header
-
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 22) {
-                        switch selectedTab {
-                        case "Draft":
-                            draftScreen
-                        case "Heroes":
-                            heroesScreen
-                        case "Meta":
-                            placeholderScreen(
-                                "Meta",
-                                description: "Ranked statistics and current hero rankings will appear here."
-                            )
-                        default:
-                            placeholderScreen(
-                                "Settings",
-                                description: "Voice and app preferences will appear here."
-                            )
-                        }
+            TabView(selection: $selectedTab) {
+                draftScreen
+                    .tabItem {
+                        Label("Draft", systemImage: "gamecontroller")
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 24)
-                    .padding(.bottom, 30)
-                }
+                    .tag("Draft")
 
-                bottomBar
+                heroesScreen
+                    .tabItem {
+                        Label("Heroes", systemImage: "person.3")
+                    }
+                    .tag("Heroes")
+
+                settingsScreen
+                    .tabItem {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .tag("Settings")
             }
+            .tint(.purple)
         }
         .preferredColorScheme(.dark)
-        .animation(
-            .spring(response: 0.4, dampingFraction: 0.82),
-            value: selectedTab
-        )
         .task {
             await heroAPI.loadHeroes()
         }
-        .alert("Draft Coach", isPresented: $showInfo) {
-            Button("Got it", role: .cancel) { }
-        } message: {
-            Text("Your voice-first MLBB draft assistant is being built. Hero data is loaded from the community hero database.")
+        .onChange(of: screenCapture.recognizedText) { _, lines in
+            recognition.process(
+                recognizedLines: lines,
+                heroes: heroAPI.heroes
+            )
         }
     }
-
-    // MARK: Header
-
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("DRAFT COACH")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .tracking(3)
-                    .foregroundStyle(.cyan)
-
-                Text("MLBB Assistant")
-                    .font(.system(size: 23, weight: .bold, design: .rounded))
-            }
-
-            Spacer()
-
-            Button {
-                showInfo = true
-            } label: {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 19, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .frame(width: 46, height: 46)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.12)))
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 12)
-    }
-
-    // MARK: Draft screen
 
     private var draftScreen: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("YOUR DRAFT")
-                        .font(.system(size: 12, weight: .bold))
-                        .tracking(2)
-                        .foregroundStyle(.white.opacity(0.55))
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
 
-                    Text("Make the winning pick.")
-                        .font(.system(size: 25, weight: .bold, design: .rounded))
+                    captureCard
+
+                    recognizedHeroesCard
+
+                    laneCard
+
+                    teamCard(
+                        title: "Your Team",
+                        heroes: allied,
+                        color: .cyan
+                    )
+
+                    teamCard(
+                        title: "Enemy Team",
+                        heroes: enemy,
+                        color: .red
+                    )
+
+                    turnCard
+
+                    analysisCard
+
+                    voiceCard
                 }
-
-                Spacer()
-
-                Image(systemName: "sparkles")
-                    .font(.system(size: 27))
-                    .foregroundStyle(.cyan)
+                .padding()
             }
+            .background(Color.clear)
+            .navigationBarHidden(true)
+        }
+    }
 
-            HStack(spacing: 10) {
-                statusPill(
-                    "HERO API",
-                    heroAPI.heroes.isEmpty ? "Loading" : "Connected"
-                )
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("MLBB DRAFT COACH")
+                .font(.system(size: 12, weight: .bold))
+                .tracking(3)
+                .foregroundStyle(.purple)
 
-                statusPill("AI", "Local mode")
-            }
+            Text("Draft Assistant")
+                .font(.system(size: 30, weight: .bold))
 
-            screenCaptureCard
+            Text("Live recognition • AI recommendations")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-            VStack(alignment: .leading, spacing: 14) {
-                Text("TEAM COMPOSITION")
-                    .font(.system(size: 12, weight: .bold))
-                    .tracking(1.5)
-                    .foregroundStyle(.white.opacity(0.55))
-
-                HStack(spacing: 10) {
-                    teamCard("YOUR TEAM", color: .cyan)
-                    teamCard("ENEMY TEAM", color: .pink)
-                }
-            }
-            .glassCard()
-
+    private var captureCard: some View {
+        card {
             VStack(alignment: .leading, spacing: 12) {
-                Text("VOICE COACH")
-                    .font(.system(size: 12, weight: .bold))
-                    .tracking(1.5)
-                    .foregroundStyle(.white.opacity(0.55))
+                sectionTitle("LIVE SCREEN RECOGNITION")
 
-                HStack(spacing: 12) {
-                    Image(systemName: "waveform")
-                        .font(.system(size: 27))
-                        .foregroundStyle(.cyan)
+                HStack {
+                    Circle()
+                        .fill(screenCapture.isCapturing ? .green : .gray)
+                        .frame(width: 9, height: 9)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Your draft assistant")
-                            .font(.system(size: 16, weight: .bold))
+                    Text(screenCapture.status)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
 
-                        Text("Hear announcements and hero information.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.55))
+                HStack {
+                    Button {
+                        screenCapture.startScreenCapture()
+                    } label: {
+                        Label("Start Capture", systemImage: "record.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                    .disabled(screenCapture.isCapturing)
+
+                    Button {
+                        screenCapture.stopScreenCapture()
+                    } label: {
+                        Label("Stop", systemImage: "stop.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!screenCapture.isCapturing)
+                }
+
+                Text("OCR scans visible text on your selected screen.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+
+                Text("OCR scans: \(screenCapture.framesReceived)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+        }
+    }
+
+    private var recognizedHeroesCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("RECOGNIZED HEROES")
+
+                if recognition.detectedHeroes.isEmpty {
+                    Text("No confirmed hero names yet.")
+                        .foregroundStyle(.white.opacity(0.5))
+                } else {
+                    ForEach(recognition.detectedHeroes, id: \.self) { hero in
+                        HStack {
+                            Text(hero)
+                                .fontWeight(.medium)
+
+                            Spacer()
+
+                            Button("Your Team") {
+                                addHero(hero, to: .ally)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.cyan)
+
+                            Button("Enemy") {
+                                addHero(hero, to: .enemy)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                        }
+                        .font(.caption)
                     }
                 }
+
+                Text("Assign recognized heroes to the correct team. OCR does not determine team or ban slots.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+        }
+    }
+
+    private var laneCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionTitle("YOUR LANE")
+
+                Picker("Lane", selection: $selectedLane) {
+                    ForEach(lanes, id: \.self) { lane in
+                        Text(lane).tag(lane)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Picker("Rank", selection: $selectedRank) {
+                    Text("Epic").tag("epic")
+                    Text("Legend").tag("legend")
+                    Text("Mythic").tag("mythic")
+                    Text("Honor").tag("honor")
+                    Text("Glory").tag("glory")
+                }
+                .pickerStyle(.menu)
+            }
+        }
+    }
+
+    private enum Team {
+        case ally
+        case enemy
+    }
+
+    private func teamCard(
+        title: String,
+        heroes: [String],
+        color: Color
+    ) -> some View {
+        card {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionTitle(title)
+
+                if heroes.isEmpty {
+                    Text("No heroes added.")
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+
+                ForEach(heroes, id: \.self) { hero in
+                    HStack {
+                        Text(hero)
+                        Spacer()
+                        Button {
+                            removeHero(hero, from: title == "Your Team" ? .ally : .enemy)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.white.opacity(0.5))
+                        }
+                    }
+                }
+            }
+            .foregroundStyle(color)
+        }
+    }
+
+    private var turnCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionTitle("DRAFT TURN")
+
+                Toggle("It's my turn to pick", isOn: $isYourTurn)
+                    .tint(.purple)
+                    .onChange(of: isYourTurn) { _, newValue in
+                        if !newValue {
+                            voiceCoach.stop()
+                        }
+                    }
+
+                Text("Turn detection is manual until the game screen layout is validated.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+        }
+    }
+
+    private var analysisCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("AI DRAFT ANALYSIS")
 
                 Button {
-                    if speaking {
-                        synthesizer.stopSpeaking(at: .immediate)
-                        speaking = false
-                    } else {
-                        speak("Welcome to MLBB Draft Coach. Your voice assistant is ready. Open the Heroes tab to hear hero names and roles.")
+                    Task {
+                        await analyzeDraft()
                     }
                 } label: {
-                    Label(
-                        speaking ? "Stop voice" : "Test voice coach",
-                        systemImage: speaking ? "stop.fill" : "speaker.wave.2.fill"
-                    )
-                    .font(.system(size: 14, weight: .semibold))
+                    HStack {
+                        if draftAPI.isLoading {
+                            ProgressView()
+                                .tint(.white)
+                        }
+
+                        Text(draftAPI.isLoading ? "Analyzing..." : "Analyze Draft")
+                            .fontWeight(.bold)
+                    }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 15)
-                    .background(
-                        LinearGradient(
-                            colors: [
-                                .cyan,
-                                Color(red: 0.25, green: 0.48, blue: 0.95)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        in: RoundedRectangle(cornerRadius: 16)
-                    )
-                    .foregroundStyle(.black)
+                    .padding(.vertical, 7)
                 }
-                .buttonStyle(.plain)
-            }
-            .glassCard()
+                .buttonStyle(.borderedProminent)
+                .tint(.purple)
+                .disabled(draftAPI.isLoading)
 
-            Text("LIVE DRAFT TOOLS")
-                .font(.system(size: 12, weight: .bold))
-                .tracking(1.5)
-                .foregroundStyle(.white.opacity(0.55))
+                if let error = draftAPI.errorMessage {
+                    Text(error)
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                }
 
-            HStack(spacing: 10) {
-                toolCard("Hero database", "person.3.fill")
-                toolCard("Patch updates", "arrow.trianglehead.2.clockwise")
-                toolCard("Voice coach", "waveform")
+                if !draftAPI.recommendation.isEmpty {
+                    Text(draftAPI.recommendation)
+                        .font(.subheadline)
+                        .textSelection(.enabled)
+                        .padding(.top, 5)
+                }
             }
         }
     }
 
-    // MARK: Screen capture card
+    private var voiceCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionTitle("VOICE COACH")
 
-    private var screenCaptureCard: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack {
-                Image(systemName: "rectangle.dashed")
-                    .font(.system(size: 22))
-                    .foregroundStyle(.cyan)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("LIVE SCREEN CAPTURE")
-                        .font(.system(size: 12, weight: .bold))
-                        .tracking(1.3)
-
-                    Text("Capture your MLBB draft screen")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.55))
-                }
-
-                Spacer()
-
-                Circle()
-                    .fill(screenCapture.isCapturing ? .green : .gray)
-                    .frame(width: 9, height: 9)
-            }
-
-            HStack(spacing: 8) {
-                Image(systemName: "waveform.path")
-                    .foregroundStyle(.cyan)
-
-                Text(screenCapture.status)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.75))
-                    .lineLimit(2)
-            }
-
-            if screenCapture.isCapturing {
                 HStack {
-                    Text("Frames received")
+                    Button {
+                        announceRecommendation()
+                    } label: {
+                        Label("Announce Pick", systemImage: "speaker.wave.2")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
 
-                    Spacer()
+                    Button {
+                        voiceCoach.replay()
+                    } label: {
+                        Label("Replay", systemImage: "repeat")
+                    }
+                    .buttonStyle(.bordered)
 
-                    Text("\(screenCapture.framesReceived)")
-                        .monospacedDigit()
-                        .fontWeight(.bold)
-                        .foregroundStyle(.cyan)
+                    Button {
+                        voiceCoach.stop()
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.6))
+                .font(.caption)
             }
-
-            Button {
-                if screenCapture.isCapturing {
-                    screenCapture.stopScreenCapture()
-                } else {
-                    screenCapture.startScreenCapture()
-                }
-            } label: {
-                Label(
-                    screenCapture.isCapturing
-                        ? "Stop Screen Capture"
-                        : "Start Screen Capture",
-                    systemImage: screenCapture.isCapturing
-                        ? "stop.fill"
-                        : "record.circle"
-                )
-                .font(.system(size: 14, weight: .bold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 15)
-                .background(
-                    screenCapture.isCapturing
-                        ? Color.red.opacity(0.85)
-                        : Color.cyan,
-                    in: RoundedRectangle(cornerRadius: 15)
-                )
-                .foregroundStyle(.black)
-            }
-            .buttonStyle(.plain)
-
-            Text("You'll be asked to approve screen sharing through Apple's system picker.")
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.45))
         }
-        .glassCard()
     }
-
-    // MARK: Heroes screen
 
     private var heroesScreen: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("HERO DATABASE")
-                    .font(.system(size: 12, weight: .bold))
-                    .tracking(2)
-                    .foregroundStyle(.cyan)
+        NavigationStack {
+            List {
+                if heroAPI.isLoading {
+                    ProgressView("Loading heroes...")
+                }
 
-                Text("Meet the heroes.")
-                    .font(.system(size: 27, weight: .bold, design: .rounded))
+                if let error = heroAPI.errorMessage {
+                    Text(error)
+                        .foregroundStyle(.red)
+                }
 
-                Text("Tap a speaker to hear the hero's name and role.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.55))
+                ForEach(heroAPI.heroes.filter {
+                    $0.name.lowercased() != "wanwan"
+                }) { hero in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(hero.name)
+                            .fontWeight(.semibold)
+
+                        Text("\(hero.role) • \(hero.lane)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .listRowBackground(Color.white.opacity(0.05))
+                }
             }
-
-            HStack(spacing: 10) {
-                Label(
-                    "\(heroAPI.heroes.count) heroes",
-                    systemImage: "person.3.fill"
-                )
-                .font(.system(size: 12, weight: .semibold))
-
-                Spacer()
-
+            .scrollContentBackground(.hidden)
+            .navigationTitle("Hero Catalogue")
+            .toolbar {
                 Button {
                     Task {
                         await heroAPI.loadHeroes()
                     }
                 } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .semibold))
+                    Image(systemName: "arrow.clockwise")
                 }
-                .disabled(heroAPI.isLoading)
-            }
-            .foregroundStyle(.cyan)
-            .glassCard()
-
-            if heroAPI.isLoading && heroAPI.heroes.isEmpty {
-                ProgressView("Loading heroes...")
-                    .tint(.cyan)
-                    .frame(maxWidth: .infinity)
-                    .padding(30)
-                    .glassCard()
-
-            } else if let error = heroAPI.errorMessage,
-                      heroAPI.heroes.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "wifi.exclamationmark")
-                        .font(.system(size: 28))
-                        .foregroundStyle(.orange)
-
-                    Text("Couldn't load heroes")
-                        .font(.system(size: 17, weight: .bold))
-
-                    Text(error)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .multilineTextAlignment(.center)
-
-                    Button("Try again") {
-                        Task {
-                            await heroAPI.loadHeroes()
-                        }
-                    }
-                    .foregroundStyle(.cyan)
-                }
-                .frame(maxWidth: .infinity)
-                .glassCard()
-
-            } else {
-                VStack(spacing: 9) {
-                    ForEach(heroAPI.heroes) { hero in
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(hero.name)
-                                    .font(.system(size: 15, weight: .bold))
-
-                                Text([
-                                    hero.role,
-                                    hero.lane
-                                ].filter { !$0.isEmpty }.joined(separator: " • "))
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.white.opacity(0.55))
-                            }
-
-                            Spacer()
-
-                            Button {
-                                speak("\(hero.name). Role: \(hero.role.isEmpty ? "Unknown" : hero.role). Lane: \(hero.lane.isEmpty ? "Unknown" : hero.lane).")
-                            } label: {
-                                Image(systemName: "speaker.wave.2.fill")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(.cyan)
-                                    .frame(width: 42, height: 42)
-                                    .background(.white.opacity(0.07), in: Circle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(13)
-                        .background(
-                            .white.opacity(0.045),
-                            in: RoundedRectangle(cornerRadius: 15)
-                        )
-                    }
-                }
-                .glassCard()
-
-                Button {
-                    let announcement = heroAPI.heroes.prefix(40).map {
-                        "\($0.name), role \($0.role.isEmpty ? "unknown" : $0.role)"
-                    }.joined(separator: ". ")
-
-                    speak("Here are the heroes. \(announcement)")
-                } label: {
-                    Label(
-                        "Read hero list aloud",
-                        systemImage: "speaker.wave.2.fill"
-                    )
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 15)
-                    .background(
-                        .cyan,
-                        in: RoundedRectangle(cornerRadius: 16)
-                    )
-                    .foregroundStyle(.black)
-                }
-                .buttonStyle(.plain)
-            }
-
-            if let updated = heroAPI.lastUpdated {
-                Text("Last updated: \(updated.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.4))
             }
         }
     }
 
-    // MARK: Placeholder
-
-    private func placeholderScreen(
-        _ title: String,
-        description: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 15) {
-            Text(title)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-
-            Text(description)
-                .foregroundStyle(.white.opacity(0.6))
-        }
-        .frame(maxWidth: .infinity, minHeight: 300, alignment: .leading)
-        .glassCard()
-    }
-
-    // MARK: Bottom navigation
-
-    private var bottomBar: some View {
-        HStack(spacing: 0) {
-            ForEach(tabs, id: \.self) { tab in
-                Button {
-                    selectedTab = tab
-                } label: {
-                    VStack(spacing: 6) {
-                        Image(systemName: iconFor(tab))
-                            .font(.system(size: 18, weight: .semibold))
-
-                        Text(tab)
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(
-                        selectedTab == tab ? .cyan : .white.opacity(0.48)
-                    )
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
+    private var settingsScreen: some View {
+        NavigationStack {
+            Form {
+                Section("Data") {
+                    LabeledContent("Hero source", value: "MLBBDex")
+                    LabeledContent("AI provider", value: "Groq")
+                    LabeledContent("Excluded hero", value: "Wanwan")
                 }
-                .buttonStyle(.plain)
+
+                Section("Recognition") {
+                    Text("Screen capture requires your permission.")
+                    Text("Hero names are recognized locally using Apple Vision.")
+                    Text("Team assignment and turn detection are not automatic yet.")
+                }
             }
-        }
-        .padding(.horizontal, 8)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(.white.opacity(0.10))
-                .frame(height: 1)
+            .navigationTitle("Settings")
         }
     }
 
-    // MARK: Reusable components
-
-    private func statusPill(
-        _ title: String,
-        _ value: String
-    ) -> some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(.orange)
-                .frame(width: 6, height: 6)
-
-            Text(title)
-                .fontWeight(.bold)
-
-            Text(value)
-                .foregroundStyle(.white.opacity(0.65))
-        }
-        .font(.system(size: 10))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.10)))
-    }
-
-    private func teamCard(
-        _ title: String,
-        color: Color
+    private func card<Content: View>(
+        @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 10, weight: .bold))
-                .tracking(1)
-                .foregroundStyle(color)
-
-            ForEach(0..<5) { index in
-                HStack {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .bold))
-
-                    Text("Empty slot \(index + 1)")
-                        .font(.system(size: 11))
-
-                    Spacer()
-                }
-                .foregroundStyle(.white.opacity(0.48))
-                .padding(9)
-                .background(
-                    .white.opacity(0.045),
-                    in: RoundedRectangle(cornerRadius: 10)
-                )
-            }
+            content()
         }
+        .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func toolCard(
-        _ title: String,
-        _ icon: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundStyle(.cyan)
-
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.8))
-        }
-        .frame(maxWidth: .infinity, minHeight: 85, alignment: .leading)
-        .glassCard()
-    }
-
-    private func iconFor(_ tab: String) -> String {
-        switch tab {
-        case "Draft": return "rectangle.stack.fill"
-        case "Heroes": return "person.3"
-        case "Meta": return "chart.bar.fill"
-        default: return "gearshape.fill"
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
         }
     }
 
-    // MARK: Voice
-
-    private func speak(_ message: String) {
-        if synthesizer.isSpeaking {
-            synthesizer.stopSpeaking(at: .immediate)
-            speaking = false
-        }
-
-        let utterance = AVSpeechUtterance(string: message)
-        utterance.rate = 0.48
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-
-        speaking = true
-        synthesizer.speak(utterance)
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.bold))
+            .tracking(1.3)
+            .foregroundStyle(.purple)
     }
-}
 
-// MARK: Glass card style
-
-extension View {
-    func glassCard() -> some View {
-        self
-            .padding(16)
-            .background(
-                .ultraThinMaterial,
-                in: RoundedRectangle(cornerRadius: 23)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 23)
-                    .stroke(.white.opacity(0.12), lineWidth: 1)
+    private func addHero(_ hero: String, to team: Team) {
+        switch team {
+        case .ally:
+            enemy.removeAll { $0 == hero }
+            if !allied.contains(hero) {
+                allied.append(hero)
             }
+        case .enemy:
+            allied.removeAll { $0 == hero }
+            if !enemy.contains(hero) {
+                enemy.append(hero)
+            }
+        }
     }
-}
 
-#Preview {
-    ContentView()
+    private func removeHero(_ hero: String, from team: Team) {
+        switch team {
+        case .ally:
+            allied.removeAll { $0 == hero }
+        case .enemy:
+            enemy.removeAll { $0 == hero }
+        }
+    }
+
+    private func analyzeDraft() async {
+        await draftAPI.analyze(
+            allied: allied,
+            enemy: enemy,
+            lane: selectedLane,
+            rank: selectedRank
+        )
+
+        if isYourTurn {
+            announceRecommendation()
+        }
+    }
+
+    private func announceRecommendation() {
+        let availableNames = heroAPI.heroes
+            .map(\.name)
+            .filter { $0.lowercased() != "wanwan" }
+
+        let recommendation = draftAPI.recommendation.lowercased()
+
+        let matches = availableNames.filter {
+            recommendation.contains($0.lowercased())
+        }
+
+        guard let bestPick = matches.first else { return }
+
+        let alternatives = matches
+            .filter { $0 != bestPick }
+
+        voiceCoach.announce(
+            bestPick: bestPick,
+            alternatives: alternatives,
+            isYourTurn: isYourTurn
+        )
+    }
 }
