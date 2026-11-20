@@ -15,6 +15,7 @@ targets:
       - path: MLBBDraftCoach
 
     info:
+      path: Generated/Info.plist
       properties:
         NSScreenCaptureUsageDescription: "MLBB Draft Coach captures your screen with your permission to recognize MLBB picks, bans and draft turns."
         UIBackgroundModes:
