@@ -50,7 +50,6 @@ final class ScreenCaptureManager: NSObject, ObservableObject {
         let configuration = SCStreamConfiguration()
         configuration.width = 1024
         configuration.height = 576
-        configuration.queueDepth = 3
         configuration.capturesAudio = false
 
         let newStream = SCStream(
