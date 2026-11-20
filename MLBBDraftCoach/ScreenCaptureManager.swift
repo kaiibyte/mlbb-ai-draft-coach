@@ -1,21 +1,25 @@
 
 import SwiftUI
 import ScreenCaptureKit
+import Vision
 import CoreMedia
+import CoreImage
 
 final class ScreenCaptureManager: NSObject, ObservableObject {
-
     @MainActor @Published private(set) var isCapturing = false
     @MainActor @Published private(set) var status = "Screen capture is off"
     @MainActor @Published private(set) var framesReceived = 0
+    @MainActor @Published private(set) var recognizedText: [String] = []
 
     private let picker = SCContentSharingPicker.shared
-
     private var stream: SCStream?
 
     private let frameQueue = DispatchQueue(
         label: "com.draftcoach.screenframes"
     )
+
+    private var lastOCRTime = Date.distantPast
+    private let ciContext = CIContext()
 
     @MainActor
     func startScreenCapture() {
@@ -70,7 +74,8 @@ final class ScreenCaptureManager: NSObject, ObservableObject {
             stream = newStream
             isCapturing = true
             framesReceived = 0
-            status = "Screen capture is running"
+            recognizedText = []
+            status = "Capturing and recognizing screen text"
 
         } catch {
             stream = nil
@@ -83,6 +88,7 @@ final class ScreenCaptureManager: NSObject, ObservableObject {
     private func stopStream() async {
         guard let currentStream = stream else {
             isCapturing = false
+            status = "Screen capture is off"
             return
         }
 
@@ -96,12 +102,39 @@ final class ScreenCaptureManager: NSObject, ObservableObject {
         isCapturing = false
         status = "Screen capture is off"
     }
+
+    private func recognizeText(in pixelBuffer: CVPixelBuffer) {
+        let request = VNRecognizeTextRequest()
+
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = false
+
+        do {
+            try VNImageRequestHandler(
+                cvPixelBuffer: pixelBuffer
+            ).perform([request])
+
+            let lines = (request.results ?? []).compactMap {
+                $0.topCandidates(1).first?.string
+            }
+
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.recognizedText = lines
+                self.framesReceived += 1
+            }
+
+        } catch {
+            Task { @MainActor [weak self] in
+                self?.status = "Text recognition failed"
+            }
+        }
+    }
 }
 
-// MARK: - Screen sharing picker
+// MARK: Screen sharing picker
 
 extension ScreenCaptureManager: SCContentSharingPickerObserver {
-
     nonisolated func contentSharingPicker(
         _ picker: SCContentSharingPicker,
         didUpdateWith filter: SCContentFilter,
@@ -130,10 +163,9 @@ extension ScreenCaptureManager: SCContentSharingPickerObserver {
     }
 }
 
-// MARK: - Screen stream
+// MARK: Screen stream
 
 extension ScreenCaptureManager: SCStreamOutput, SCStreamDelegate {
-
     nonisolated func stream(
         _ stream: SCStream,
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
@@ -142,9 +174,17 @@ extension ScreenCaptureManager: SCStreamOutput, SCStreamDelegate {
         guard outputType == .screen else { return }
         guard CMSampleBufferIsValid(sampleBuffer) else { return }
 
-        Task { @MainActor [weak self] in
-            self?.framesReceived += 1
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            return
         }
+
+        let now = Date()
+        guard now.timeIntervalSince(lastOCRTime) >= 1.0 else {
+            return
+        }
+        lastOCRTime = now
+
+        recognizeText(in: pixelBuffer)
     }
 
     nonisolated func stream(
