@@ -6,7 +6,9 @@ struct ContentView: View {
     @State private var selectedTab = "Draft"
     @State private var speaking = false
     @State private var showInfo = false
+
     @StateObject private var heroAPI = HeroAPI()
+    @StateObject private var screenCapture = ScreenCaptureManager()
 
     private let tabs = ["Draft", "Heroes", "Meta", "Settings"]
     private let synthesizer = AVSpeechSynthesizer()
@@ -47,9 +49,15 @@ struct ContentView: View {
                         case "Heroes":
                             heroesScreen
                         case "Meta":
-                            placeholderScreen("Meta", description: "Ranked statistics and current hero rankings will appear here.")
+                            placeholderScreen(
+                                "Meta",
+                                description: "Ranked statistics and current hero rankings will appear here."
+                            )
                         default:
-                            placeholderScreen("Settings", description: "Voice and app preferences will appear here.")
+                            placeholderScreen(
+                                "Settings",
+                                description: "Voice and app preferences will appear here."
+                            )
                         }
                     }
                     .padding(.horizontal, 20)
@@ -61,7 +69,10 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: selectedTab)
+        .animation(
+            .spring(response: 0.4, dampingFraction: 0.82),
+            value: selectedTab
+        )
         .task {
             await heroAPI.loadHeroes()
         }
@@ -71,6 +82,8 @@ struct ContentView: View {
             Text("Your voice-first MLBB draft assistant is being built. Hero data is loaded from the community hero database.")
         }
     }
+
+    // MARK: Header
 
     private var header: some View {
         HStack {
@@ -103,6 +116,8 @@ struct ContentView: View {
         .padding(.bottom, 12)
     }
 
+    // MARK: Draft screen
+
     private var draftScreen: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
@@ -124,9 +139,15 @@ struct ContentView: View {
             }
 
             HStack(spacing: 10) {
-                statusPill("HERO API", heroAPI.heroes.isEmpty ? "Loading" : "Connected")
+                statusPill(
+                    "HERO API",
+                    heroAPI.heroes.isEmpty ? "Loading" : "Connected"
+                )
+
                 statusPill("AI", "Local mode")
             }
+
+            screenCaptureCard
 
             VStack(alignment: .leading, spacing: 14) {
                 Text("TEAM COMPOSITION")
@@ -163,7 +184,12 @@ struct ContentView: View {
                 }
 
                 Button {
-                    speak("Welcome to MLBB Draft Coach. Your voice assistant is ready. Open the Heroes tab to hear hero names and roles.")
+                    if speaking {
+                        synthesizer.stopSpeaking(at: .immediate)
+                        speaking = false
+                    } else {
+                        speak("Welcome to MLBB Draft Coach. Your voice assistant is ready. Open the Heroes tab to hear hero names and roles.")
+                    }
                 } label: {
                     Label(
                         speaking ? "Stop voice" : "Test voice coach",
@@ -174,7 +200,10 @@ struct ContentView: View {
                     .padding(.vertical, 15)
                     .background(
                         LinearGradient(
-                            colors: [.cyan, Color(red: 0.25, green: 0.48, blue: 0.95)],
+                            colors: [
+                                .cyan,
+                                Color(red: 0.25, green: 0.48, blue: 0.95)
+                            ],
                             startPoint: .leading,
                             endPoint: .trailing
                         ),
@@ -199,6 +228,94 @@ struct ContentView: View {
         }
     }
 
+    // MARK: Screen capture card
+
+    private var screenCaptureCard: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            HStack {
+                Image(systemName: "rectangle.dashed")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.cyan)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("LIVE SCREEN CAPTURE")
+                        .font(.system(size: 12, weight: .bold))
+                        .tracking(1.3)
+
+                    Text("Capture your MLBB draft screen")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+
+                Spacer()
+
+                Circle()
+                    .fill(screenCapture.isCapturing ? .green : .gray)
+                    .frame(width: 9, height: 9)
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "waveform.path")
+                    .foregroundStyle(.cyan)
+
+                Text(screenCapture.status)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(2)
+            }
+
+            if screenCapture.isCapturing {
+                HStack {
+                    Text("Frames received")
+
+                    Spacer()
+
+                    Text("\(screenCapture.framesReceived)")
+                        .monospacedDigit()
+                        .fontWeight(.bold)
+                        .foregroundStyle(.cyan)
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.6))
+            }
+
+            Button {
+                if screenCapture.isCapturing {
+                    screenCapture.stopScreenCapture()
+                } else {
+                    screenCapture.startScreenCapture()
+                }
+            } label: {
+                Label(
+                    screenCapture.isCapturing
+                        ? "Stop Screen Capture"
+                        : "Start Screen Capture",
+                    systemImage: screenCapture.isCapturing
+                        ? "stop.fill"
+                        : "record.circle"
+                )
+                .font(.system(size: 14, weight: .bold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background(
+                    screenCapture.isCapturing
+                        ? Color.red.opacity(0.85)
+                        : Color.cyan,
+                    in: RoundedRectangle(cornerRadius: 15)
+                )
+                .foregroundStyle(.black)
+            }
+            .buttonStyle(.plain)
+
+            Text("You'll be asked to approve screen sharing through Apple's system picker.")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.45))
+        }
+        .glassCard()
+    }
+
+    // MARK: Heroes screen
+
     private var heroesScreen: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
@@ -216,8 +333,11 @@ struct ContentView: View {
             }
 
             HStack(spacing: 10) {
-                Label("\(heroAPI.heroes.count) heroes", systemImage: "person.3.fill")
-                    .font(.system(size: 12, weight: .semibold))
+                Label(
+                    "\(heroAPI.heroes.count) heroes",
+                    systemImage: "person.3.fill"
+                )
+                .font(.system(size: 12, weight: .semibold))
 
                 Spacer()
 
@@ -240,6 +360,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                     .padding(30)
                     .glassCard()
+
             } else if let error = heroAPI.errorMessage,
                       heroAPI.heroes.isEmpty {
                 VStack(spacing: 12) {
@@ -264,6 +385,7 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .glassCard()
+
             } else {
                 VStack(spacing: 9) {
                     ForEach(heroAPI.heroes) { hero in
@@ -294,7 +416,10 @@ struct ContentView: View {
                             .buttonStyle(.plain)
                         }
                         .padding(13)
-                        .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 15))
+                        .background(
+                            .white.opacity(0.045),
+                            in: RoundedRectangle(cornerRadius: 15)
+                        )
                     }
                 }
                 .glassCard()
@@ -306,12 +431,18 @@ struct ContentView: View {
 
                     speak("Here are the heroes. \(announcement)")
                 } label: {
-                    Label("Read hero list aloud", systemImage: "speaker.wave.2.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 15)
-                        .background(.cyan, in: RoundedRectangle(cornerRadius: 16))
-                        .foregroundStyle(.black)
+                    Label(
+                        "Read hero list aloud",
+                        systemImage: "speaker.wave.2.fill"
+                    )
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 15)
+                    .background(
+                        .cyan,
+                        in: RoundedRectangle(cornerRadius: 16)
+                    )
+                    .foregroundStyle(.black)
                 }
                 .buttonStyle(.plain)
             }
@@ -324,7 +455,12 @@ struct ContentView: View {
         }
     }
 
-    private func placeholderScreen(_ title: String, description: String) -> some View {
+    // MARK: Placeholder
+
+    private func placeholderScreen(
+        _ title: String,
+        description: String
+    ) -> some View {
         VStack(alignment: .leading, spacing: 15) {
             Text(title)
                 .font(.system(size: 28, weight: .bold, design: .rounded))
@@ -335,6 +471,8 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, minHeight: 300, alignment: .leading)
         .glassCard()
     }
+
+    // MARK: Bottom navigation
 
     private var bottomBar: some View {
         HStack(spacing: 0) {
@@ -368,7 +506,12 @@ struct ContentView: View {
         }
     }
 
-    private func statusPill(_ title: String, _ value: String) -> some View {
+    // MARK: Reusable components
+
+    private func statusPill(
+        _ title: String,
+        _ value: String
+    ) -> some View {
         HStack(spacing: 6) {
             Circle()
                 .fill(.orange)
@@ -387,7 +530,10 @@ struct ContentView: View {
         .overlay(Capsule().stroke(.white.opacity(0.10)))
     }
 
-    private func teamCard(_ title: String, color: Color) -> some View {
+    private func teamCard(
+        _ title: String,
+        color: Color
+    ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.system(size: 10, weight: .bold))
@@ -398,19 +544,27 @@ struct ContentView: View {
                 HStack {
                     Image(systemName: "plus")
                         .font(.system(size: 12, weight: .bold))
+
                     Text("Empty slot \(index + 1)")
                         .font(.system(size: 11))
+
                     Spacer()
                 }
                 .foregroundStyle(.white.opacity(0.48))
                 .padding(9)
-                .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+                .background(
+                    .white.opacity(0.045),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func toolCard(_ title: String, _ icon: String) -> some View {
+    private func toolCard(
+        _ title: String,
+        _ icon: String
+    ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 20))
@@ -433,14 +587,12 @@ struct ContentView: View {
         }
     }
 
+    // MARK: Voice
+
     private func speak(_ message: String) {
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
             speaking = false
-
-            if message == "STOP" {
-                return
-            }
         }
 
         let utterance = AVSpeechUtterance(string: message)
@@ -452,11 +604,16 @@ struct ContentView: View {
     }
 }
 
+// MARK: Glass card style
+
 extension View {
     func glassCard() -> some View {
         self
             .padding(16)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 23))
+            .background(
+                .ultraThinMaterial,
+                in: RoundedRectangle(cornerRadius: 23)
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: 23)
                     .stroke(.white.opacity(0.12), lineWidth: 1)
